@@ -1,0 +1,109 @@
+#Get current opening price and past prices to calculate trend / performance on different timeframes for choosen instrument (Gold or what ever you want trade)
+trend8h = open / open[500] #price 500 Minutes ago,  time parameters are in minutes so be sure you set up the trading frquency to 1 Minute bc we count later with minutes!
+trend4h =  open / open[239] 
+trend1h = open / open[59]
+trend30m = open / open[29]
+trend15m = open / open[14]
+
+#Get market data from other markets
+US30:1m us30m1 = open           #latest price
+US30:1m us30m2 = open[29]       #price 30 Minutes ago
+trendus30m = us30m1 / us30m2    #same as above, get prices and calculate the trend
+
+#Idendify market conditions based on trends and indicators, used for different First Entry
+sideways = true if trend8h >= 0.9998 and trend8h >= 1.0001 and trend4h >= 1.0001 else false
+bull = true if trend8h > 1 and trend4h > 1 else false
+bear = true if trend8h < 1 and trend4h < 1 else false
+
+#Setup factors for each Marketsituation, given in %, 1.00 = 100% , 1.01 = 101% , 99,98% = 0,9998 and so on. Used to adjust TP and TS
+marketfactor = 1 if sideways else (1.0001 if bull else 0.9999)
+
+#Define trade "Basic parameters" and adjust them based on market conditions
+maxwaittime = 5                           #If a first possible entry is catched wait amount of minutes before reset the "Firstprice" if second check is false
+maxopentime = 90                           #Max holding time for a opened postion, closes after this time if Take profit or Stoploss not reached
+maxtakeprofit = 1.007 * marketfactor       #First takeprofit amount given in %, 1.00 = 100%
+maxstoploss = 0.99                         #First Stoploss, if postition reaches a certain profit stoploss updates
+triggerTS = 1.005 * marketfactor           #If position reaches this amount of profit changes Stoploss
+setTS = 1.002 * marketfactor               #New Stoploss in profit
+
+#Prepare for Entry 
+#Step 1: First Price (if entry rules are true get a first price) 
+#Step 2: Entry Price, we can now create entry rules based on the "First price", resets if 2nd rules don't trigger within the time we set up -> maxwaittime
+
+######################### First Step: First Entry rules ####################################################################################################
+
+#You can setup rules for the 3 different market conditions, rules can be identical :)
+sidewaysRules = trend30m > 1
+bullmarketRules = trend30m < 1
+bearmarketRules = trend30m < trend15m
+
+#Checks the marketcondition and entryrules (BE SURE YOUR MARKETCONDITION RULES MATCH EXCLUSIVE: Bear and Bull can't be true at the same time!)
+check1 = sideways and sidewaysRules
+check2 = bull and bullmarketRules
+check3 = bear and bearmarketRules
+
+#if Market and Marketrules are true gets the current price
+firstsignal = open if check1 or check2 or check3
+
+######################### Second step: Second Entry rules ###################################################################################################
+
+#Check if we have a firstsignal and set the firstprice only if we don't have one
+series firstprice:
+  once: 0
+  if firstsignal > 0 and firstprice == 0: open  
+ 
+#If the first price set, count the minutes to compare them later with "maxwaittime"-value
+series wait:
+  once: 0   
+  if firstsignal > 0 and wait == 0: 0   
+  rest: wait + 1
+
+#Check if a firstprice is set and active (don't forget its reseted after the maxwaittime value if this rules don't trigger) and add your second rules
+checksignal = firstprice != 0 #check if the first rules are true
+secondRules = firstprice -1 > open and ADX(30) > 20 #add all the rules you want here
+secondsignal = checksignal and secondRules
+
+######################### Third step: Open a position #########################################################################################################
+enter long when secondsignal
+
+######################### Fourth step: Prepare for Exit #######################################################################################################
+#Get the price we opened the postion -> used for TP and SL
+series openprice:
+  once: 0
+  if secondsignal and openprice == 0: open
+
+#Count the minutes since we openend the postion -> used for max holding time and TP adjustments
+series count:
+  once: 0
+  if openprice and count == 0: 0 
+  rest: count + 1
+
+########## Resets the counter if another Long Signal is produced while a postion is active and is bigger than current price  ###############
+if count > 45 and openprice >= open and secondsignal update count: 15
+
+#Adjust dynamic takeprofit based on Postion-Open-time and Postion-Open-price
+tp =      unknown if openprice == 0 else(
+          maxtakeprofit * 1.00  )if count < maxopentime * 0.25  else(   
+          maxtakeprofit * 0.999  )if count >= maxopentime * 0.25 and count < maxopentime * 0.50 else(   
+          maxtakeprofit * 0.998  )if count >= maxopentime * 0.50 and count < maxopentime * 0.75 else maxtakeprofit *0.997
+takeprofit = unknown if openprice == 0 else openprice * tp
+
+#Dynamic stoploss and trailing stop based on Postion-Open-price
+series stoploss:
+  once: 0
+if openprice > 0 and stoploss != openprice * setTS update stoploss: openprice * maxstoploss 
+if stoploss == openprice * maxstoploss and openprice * triggerTS <= open update stoploss: openprice * setTS
+
+######################### Fifth step: Close the Position ########################################################################################################
+exitrule = open >= takeprofit or count >= maxopentime or  open <= stoploss 
+exit long when exitrule
+
+######################### Sixth step: Reset the Counters ########################################################################################################
+if exitrule update openprice: 0
+if openprice == 0 update count: 0
+if openprice == 0 update stoploss: 0
+if wait >= maxwaittime update firstprice: 0 
+if firstprice == 0 update wait: 0
+if openprice > 0 update wait: unknown
+if openprice > 0 update firstprice: firstprice
+if exitrule and openprice == 0 update firstprice: 0
