@@ -1,5 +1,5 @@
 #Get current opening price and past prices to calculate trend / performance on different timeframes for choosen instrument (Gold or what ever you want trade)
-trend8h = open / open[500] #price 500 Minutes ago,  time parameters are in minutes so be sure you set up the trading frquency to 1 Minute bc we count later with minutes!
+trend8h = open / open[500] #price 501 Minutes ago,  time parameters are in minutes so be sure you set up the trading frquency to 1 Minute bc we count later with minutes!
 trend4h =  open / open[239] 
 trend1h = open / open[59]
 trend30m = open / open[29]
